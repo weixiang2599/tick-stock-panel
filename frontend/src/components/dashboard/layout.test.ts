@@ -202,3 +202,21 @@ describe('compactLayout', () => {
     }
   })
 })
+
+
+describe('legacy heat ranking layout migration', () => {
+  it('splits both cards into four independent columns aligned with stock rankings', () => {
+    const old = [
+      { i: 'concept-rank', t: 'concept-rank', x: 0, y: 12, w: 6, h: 9 },
+      { i: 'industry-rank', t: 'industry-rank', x: 6, y: 12, w: 6, h: 9 },
+      ...['gainers', 'losers', 'turnover', 'activity'].map((t, i) => ({ i: t, t, x: i * 3, y: 21, w: 3, h: 13 })),
+    ]
+    const migrated = normalizeDashboardLayout({ v: 1, items: old })
+    const types = ['concept-leading', 'concept-lagging', 'industry-leading', 'industry-lagging']
+    for (const [i, t] of types.entries()) {
+      expect(migrated.find(v => v.t === t)).toMatchObject({ x: i * 3, y: 12, w: 3, h: 9 })
+    }
+    expect(migrated).toHaveLength(8)
+    expect(normalizeDashboardLayout(toBlob(migrated))).toEqual(migrated)
+  })
+})

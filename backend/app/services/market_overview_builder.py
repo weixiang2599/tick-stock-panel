@@ -274,7 +274,7 @@ def _leader_sort_key(row: dict) -> float:
     return value if value is not None else float("-inf")
 
 
-def _dimension_rank(rows: list[dict], repo, kind: str, limit: int = 5, level: int | None = None) -> dict:
+def _dimension_rank(rows: list[dict], repo, kind: str, limit: int = 10, level: int | None = None) -> dict:
     if not rows:
         return {"leading": [], "lagging": []}
 

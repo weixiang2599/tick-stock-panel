@@ -16,7 +16,7 @@ import { SealedBadge } from '@/components/SealedBadge'
 import { scoreColor, fmtPrice, fmtStockPct, pctClass, compactCount, SectionTitle, MiniMetric, KpiCell } from './shared'
 import { EmotionScoreConfigDialog } from './EmotionScoreConfigDialog'
 import {
-  IndexTicker, BreadthBar, DistributionBars, EmotionRadar, LadderMini, StockList, HotRankCard, MonitorWidget,
+  IndexTicker, BreadthBar, DistributionBars, EmotionRadar, LadderMini, StockList, HotRankCard, MonitorWidget, WatchlistWidget,
   stockListNav, rankNav,
 } from './widgets'
 import type { DashboardItem, WidgetType } from './layout'
@@ -197,20 +197,38 @@ export const WIDGET_DEFS: WidgetDef[] = [
     render: ctx => sectionCard(<TrendWidget ctx={ctx} />),
   },
   {
-    id: 'concept-rank', label: '概念热度', icon: Flame, minW: 3, minH: 6, defW: 6, defH: 8,
+    id: 'concept-leading', label: '概念领涨', icon: Flame, minW: 2, minH: 6, defW: 3, defH: 9,
     render: ctx => (
-      <HotRankCard title="概念热度" rank={ctx.data.concept_rank} configUrl="/concept-analysis"
+      <HotRankCard title="概念领涨" side="leading" rank={ctx.data.concept_rank} configUrl="/concept-analysis"
         activeSymbol={ctx.activeSymbol('concept')}
-        onStockClick={(symbol, name) => ctx.openStock('concept', symbol, name, rankNav(ctx.data.concept_rank))}
+        onStockClick={(symbol, name) => ctx.openStock('concept', symbol, name, rankNav({ leading: ctx.data.concept_rank?.leading }))}
         onDimensionClick={ctx.openDimension} />
     ),
   },
   {
-    id: 'industry-rank', label: '行业热度', icon: Flame, minW: 3, minH: 6, defW: 6, defH: 8,
+    id: 'concept-lagging', label: '概念领跌', icon: Flame, minW: 2, minH: 6, defW: 3, defH: 9,
     render: ctx => (
-      <HotRankCard title="行业热度" rank={ctx.data.industry_rank} configUrl="/industry-analysis"
+      <HotRankCard title="概念领跌" side="lagging" rank={ctx.data.concept_rank} configUrl="/concept-analysis"
+        activeSymbol={ctx.activeSymbol('concept')}
+        onStockClick={(symbol, name) => ctx.openStock('concept', symbol, name, rankNav({ lagging: ctx.data.concept_rank?.lagging }))}
+        onDimensionClick={ctx.openDimension} />
+    ),
+  },
+  {
+    id: 'industry-leading', label: '行业领涨', icon: Flame, minW: 2, minH: 6, defW: 3, defH: 9,
+    render: ctx => (
+      <HotRankCard title="行业领涨" side="leading" rank={ctx.data.industry_rank} configUrl="/industry-analysis"
         activeSymbol={ctx.activeSymbol('industry')}
-        onStockClick={(symbol, name) => ctx.openStock('industry', symbol, name, rankNav(ctx.data.industry_rank))}
+        onStockClick={(symbol, name) => ctx.openStock('industry', symbol, name, rankNav({ leading: ctx.data.industry_rank?.leading }))}
+        onDimensionClick={ctx.openDimension} />
+    ),
+  },
+  {
+    id: 'industry-lagging', label: '行业领跌', icon: Flame, minW: 2, minH: 6, defW: 3, defH: 9,
+    render: ctx => (
+      <HotRankCard title="行业领跌" side="lagging" rank={ctx.data.industry_rank} configUrl="/industry-analysis"
+        activeSymbol={ctx.activeSymbol('industry')}
+        onStockClick={(symbol, name) => ctx.openStock('industry', symbol, name, rankNav({ lagging: ctx.data.industry_rank?.lagging }))}
         onDimensionClick={ctx.openDimension} />
     ),
   },
@@ -260,6 +278,12 @@ export const WIDGET_DEFS: WidgetDef[] = [
     render: ctx => <MonitorSection ctx={ctx} />,
   },
   {
+    id: 'watchlist', label: '自选', icon: Target, minW: 2, minH: 6, defW: 4, defH: 22,
+    render: ctx => <WatchlistWidget
+      activeSymbol={ctx.activeSymbol('watchlist')}
+      onStockClick={(symbol, name, nav) => ctx.openStock('watchlist', symbol, name, nav)} />,
+  },
+  {
     id: 'ext-link', label: '外部链接', icon: Link2, minW: 2, minH: 5, defW: 6, defH: 10,
     render: (_ctx, item) => <ExternalLinkWidget title={item.p?.title ?? '外部链接'} url={item.p?.url ?? 'about:blank'} />,
   },
@@ -280,7 +304,7 @@ export function minSizeOf(t: WidgetType): { w: number; h: number } {
   return { w: d?.minW ?? 2, h: d?.minH ?? 4 }
 }
 
-/** 默认布局 — 用户定稿 v2(2026-09-27): 顶部通栏 → 中段四列等高(分布/雷达/趋势/梯队 各8行) → 双热度+右侧监控高栏 → 四榜单。
+/** 默认布局：顶部通栏 → 中段四列等高 → 左侧自选与监控中心，右侧四列热度与榜单。
  * 坐标必须是竖直压实后的稳定形态(列内不留空隙), 否则 RGL 渲染时会自动上提,
  * 导致「恢复默认」的 JSON 等值判断永不成立、每次都落 blob 而非 null。 */
 export const DEFAULT_LAYOUT: DashboardItem[] = [
@@ -290,11 +314,14 @@ export const DEFAULT_LAYOUT: DashboardItem[] = [
   { i: 'radar', t: 'radar', x: 3, y: 4, w: 3, h: 8 },
   { i: 'trend', t: 'trend', x: 6, y: 4, w: 3, h: 8 },
   { i: 'ladder', t: 'ladder', x: 9, y: 4, w: 3, h: 8 },
-  { i: 'concept-rank', t: 'concept-rank', x: 0, y: 12, w: 4, h: 9 },
-  { i: 'industry-rank', t: 'industry-rank', x: 4, y: 12, w: 4, h: 9 },
-  { i: 'monitor', t: 'monitor', x: 8, y: 12, w: 4, h: 22 },
-  { i: 'gainers', t: 'gainers', x: 0, y: 21, w: 2, h: 13 },
-  { i: 'losers', t: 'losers', x: 2, y: 21, w: 2, h: 13 },
-  { i: 'turnover', t: 'turnover', x: 4, y: 21, w: 2, h: 13 },
-  { i: 'activity', t: 'activity', x: 6, y: 21, w: 2, h: 13 },
+  { i: 'concept-leading', t: 'concept-leading', x: 4, y: 12, w: 2, h: 9 },
+  { i: 'concept-lagging', t: 'concept-lagging', x: 6, y: 12, w: 2, h: 9 },
+  { i: 'industry-leading', t: 'industry-leading', x: 8, y: 12, w: 2, h: 9 },
+  { i: 'industry-lagging', t: 'industry-lagging', x: 10, y: 12, w: 2, h: 9 },
+  { i: 'watchlist', t: 'watchlist', x: 0, y: 12, w: 4, h: 22 },
+  { i: 'monitor', t: 'monitor', x: 0, y: 34, w: 4, h: 22 },
+  { i: 'gainers', t: 'gainers', x: 4, y: 21, w: 2, h: 13 },
+  { i: 'losers', t: 'losers', x: 6, y: 21, w: 2, h: 13 },
+  { i: 'turnover', t: 'turnover', x: 8, y: 21, w: 2, h: 13 },
+  { i: 'activity', t: 'activity', x: 10, y: 21, w: 2, h: 13 },
 ]

@@ -17,9 +17,9 @@ export const MAX_H = 30
 
 export type WidgetType =
   | 'indices' | 'kpi' | 'distribution' | 'radar' | 'trend'
-  | 'concept-rank' | 'industry-rank'
+  | 'concept-leading' | 'concept-lagging' | 'industry-leading' | 'industry-lagging'
   | 'gainers' | 'losers' | 'turnover' | 'activity'
-  | 'ladder' | 'monitor' | 'ext-link'
+  | 'ladder' | 'monitor' | 'watchlist' | 'ext-link'
 
 export interface DashboardItem {
   /** 实例 id: 内置组件 = type; 外部链接 = ext-link-<seq> */
@@ -75,7 +75,22 @@ export function normalizeLayout(
   const seenIds = new Set<string>()
   const seenTypes = new Set<string>()
   const out: DashboardItem[] = []
-  for (const it of raw.items.slice(0, MAX_ITEMS)) {
+  // 旧双列热度卡拆分为独立模块，优先沿用下方榜单列宽与位置。
+  const rawItems: unknown[] = raw.items
+  const expanded = rawItems.flatMap((it: unknown) => {
+    if (typeof it !== 'object' || it === null) return [it]
+    const r = it as Record<string, unknown>
+    if (r.t !== 'concept-rank' && r.t !== 'industry-rank') return [it]
+    const kind = r.t === 'concept-rank' ? 'concept' : 'industry'
+    const below = kind === 'concept' ? ['gainers', 'losers'] : ['turnover', 'activity']
+    return ['leading', 'lagging'].map((side, index) => {
+      const anchor = rawItems.find(v => typeof v === 'object' && v !== null && (v as Record<string, unknown>).t === below[index]) as Record<string, unknown> | undefined
+      const w = Math.max(2, Math.floor(num(r.w, 6) / 2))
+      const t = `${kind}-${side}`
+      return { ...r, i: t, t, x: anchor?.x ?? num(r.x, 0) + index * w, w: anchor?.w ?? w }
+    })
+  })
+  for (const it of expanded.slice(0, MAX_ITEMS)) {
     if (typeof it !== 'object' || it === null) continue
     const r = it as Record<string, unknown>
     const t = typeof r.t === 'string' ? r.t : ''

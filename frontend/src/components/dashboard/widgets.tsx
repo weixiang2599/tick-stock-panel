@@ -7,7 +7,8 @@
 import { Link, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { motion } from 'framer-motion'
-import { ArrowDownRight, ArrowUpRight, Flame } from 'lucide-react'
+import { ArrowUpRight, Flame, Star } from 'lucide-react'
+import { QK } from '@/lib/queryKeys'
 import { api, type MarketSnapshotRow, type OverviewDimensionRankItem, type OverviewMarket, type AlertEvent } from '@/lib/api'
 import { fmtBigNum, fmtPct } from '@/lib/format'
 import { dimensionKindForSourceField, type DimensionMembersTarget } from '@/components/DimensionMembersDialog'
@@ -23,7 +24,7 @@ import { fmtPrice, fmtIndexPct, fmtStockPct, pctClass, scoreColor as scoreColorV
 export function stockListNav(rows: MarketSnapshotRow[], limit = 100): NavItem[] {
   return toNavItems(rows.slice(0, limit))
 }
-export function rankNav(rank?: OverviewMarket['concept_rank']): NavItem[] {
+export function rankNav(rank?: Partial<NonNullable<OverviewMarket['concept_rank']>>): NavItem[] {
   const leaders = [...(rank?.leading ?? []), ...(rank?.lagging ?? [])]
     .map(r => r.leader)
     .filter((l): l is NonNullable<typeof l> & { symbol: string } => !!l?.symbol)
@@ -33,18 +34,22 @@ export function rankNav(rank?: OverviewMarket['concept_rank']): NavItem[] {
 // ===== 指数行情条 =====
 export function IndexTicker({ item }: { item: OverviewMarket['indices'][number] }) {
   const pct = item.change_pct
-  const isUp = (pct ?? 0) >= 0
+  const change = item.change_amount
   return (
     <Link
       to={`/indices?symbol=${encodeURIComponent(item.symbol)}`}
-      className="grid min-w-0 grid-cols-[1fr_auto] items-center gap-x-2 gap-y-0.5 rounded-lg border border-border bg-elevated/45 px-1.5 py-1 shadow-[0_1px_1px_hsl(var(--border)/0.3)] backdrop-blur-sm transition-all hover:border-accent/40 hover:bg-elevated hover:shadow-[0_2px_6px_hsl(var(--accent)/0.15)]"
+      className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2 gap-y-1 rounded-lg border border-border bg-elevated/45 px-2 py-2 shadow-[0_1px_1px_hsl(var(--border)/0.3)] backdrop-blur-sm transition-all hover:border-accent/40 hover:bg-elevated hover:shadow-[0_2px_6px_hsl(var(--accent)/0.15)] sm:grid-cols-[auto_minmax(0,1fr)_auto]"
     >
-      <div className="truncate text-xs font-medium text-foreground">{item.name || item.symbol}</div>
-      <div className={`font-mono text-xs font-semibold ${pctClass(pct)}`}>{fmtIndexPct(pct)}</div>
-      <div className="font-mono text-[10px] text-muted">{item.symbol}</div>
-      <div className={`flex items-center gap-1 font-mono text-[11px] ${pctClass(pct)}`}>
-        {isUp ? <ArrowUpRight className="h-3 w-3" /> : <ArrowDownRight className="h-3 w-3" />}
+      <div className="min-w-0">
+        <div className="truncate text-xs font-medium text-foreground">{item.name || item.symbol}</div>
+        <div className="mt-1 font-mono text-[10px] text-muted">{item.symbol}</div>
+      </div>
+      <div className={`col-start-1 row-start-2 min-w-0 font-mono text-2xl font-bold leading-tight tabular-nums tracking-tight sm:col-start-2 sm:row-start-1 sm:text-center lg:text-3xl ${pctClass(pct)}`}>
         {fmtPrice(item.last_price)}
+      </div>
+      <div className={`col-start-2 row-span-2 row-start-1 text-right font-mono text-xs font-semibold tabular-nums sm:col-start-3 sm:row-span-1 ${pctClass(pct)}`}>
+        <div title="较昨日收盘涨跌点数">{change == null ? '—' : `${change > 0 ? '+' : ''}${fmtPrice(change)}`}</div>
+        <div className="mt-1" title="较昨日收盘涨跌幅">{fmtIndexPct(pct)}</div>
       </div>
     </Link>
   )
@@ -272,7 +277,7 @@ export function RankColumn({ title, rows, tone, onStockClick, onDimensionClick, 
   return (
     <div className="min-w-0 space-y-1">
       <div className={`text-[10px] font-medium ${tone === 'bull' ? 'text-bull' : 'text-bear'}`}>{title}</div>
-      {rows.slice(0, 5).map((r, idx) => {
+      {rows.slice(0, 10).map((r, idx) => {
         const kind = r.source_field ? dimensionKindForSourceField(r.source_field) : null
         const clickable = !!(r.source_field && kind && onDimensionClick)
         const isActive = r.leader?.symbol != null && r.leader.symbol === activeSymbol
@@ -332,7 +337,8 @@ export function RankColumn({ title, rows, tone, onStockClick, onDimensionClick, 
 }
 
 // ===== 概念/行业热度卡 =====
-export function HotRankCard({ title, rank, configUrl, onStockClick, onDimensionClick, activeSymbol }: {
+export function HotRankCard({ title, rank, configUrl, onStockClick, onDimensionClick, activeSymbol, side }: {
+  side?: 'leading' | 'lagging';
   title: string; rank?: OverviewMarket['concept_rank']; configUrl: string;
   onStockClick?: (symbol: string, name?: string) => void;
   onDimensionClick?: (target: DimensionMembersTarget) => void;
@@ -340,12 +346,12 @@ export function HotRankCard({ title, rank, configUrl, onStockClick, onDimensionC
 }) {
   const hasData = (rank?.leading?.length ?? 0) > 0 || (rank?.lagging?.length ?? 0) > 0
   return (
-    <section className="rounded-card border border-border bg-surface/80 p-1.5 shadow-[0_1px_2px_hsl(var(--border)/0.4)] backdrop-blur-sm transition-shadow hover:shadow-[0_2px_8px_hsl(var(--border)/0.5)]">
-      <SectionTitle icon={Flame} title={title} hint="领涨/领跌 · 点击板块看成分股" />
+    <section className="flex h-full min-h-0 flex-col rounded-card border border-border bg-surface/80 p-1.5 shadow-[0_1px_2px_hsl(var(--border)/0.4)] backdrop-blur-sm transition-shadow hover:shadow-[0_2px_8px_hsl(var(--border)/0.5)]">
+      <SectionTitle icon={Flame} title={title} hint={side ? "TOP 10" : "领涨/领跌 TOP 10 · 点击板块看成分股"} />
       {hasData ? (
-        <div className="grid grid-cols-2 gap-2">
-          <RankColumn title="领涨" rows={rank?.leading ?? []} tone="bull" onStockClick={onStockClick} onDimensionClick={onDimensionClick} activeSymbol={activeSymbol} />
-          <RankColumn title="领跌" rows={rank?.lagging ?? []} tone="bear" onStockClick={onStockClick} onDimensionClick={onDimensionClick} activeSymbol={activeSymbol} />
+        <div className={`min-h-0 flex-1 overflow-y-auto grid content-start gap-2 ${side ? 'grid-cols-1' : 'grid-cols-2'}`}>
+          {side !== 'lagging' && <RankColumn title="领涨" rows={rank?.leading ?? []} tone="bull" onStockClick={onStockClick} onDimensionClick={onDimensionClick} activeSymbol={activeSymbol} />}
+          {side !== 'leading' && <RankColumn title="领跌" rows={rank?.lagging ?? []} tone="bear" onStockClick={onStockClick} onDimensionClick={onDimensionClick} activeSymbol={activeSymbol} />}
         </div>
       ) : (
         <div className="py-4 text-center">
@@ -505,5 +511,76 @@ export function MonitorWidget({ onStockClick, activeSymbol }: {
         })}
       </div>
     </>
+  )
+}
+
+
+export function WatchlistWidget({ activeSymbol, onStockClick }: {
+  activeSymbol?: string;
+  onStockClick: (symbol: string, name: string | undefined, nav: NavItem[]) => void;
+}) {
+  const query = useQuery({
+    queryKey: QK.watchlistEnriched(),
+    queryFn: () => api.watchlistEnriched(),
+    staleTime: 10_000,
+    refetchInterval: 30_000,
+    refetchIntervalInBackground: false,
+  })
+  const rows = query.data?.rows ?? []
+  const nav = toNavItems(rows)
+  return (
+    <section className="flex h-full min-h-0 flex-col overflow-hidden rounded-card border border-border bg-surface/80 p-1.5 shadow-sm">
+      <div className="mb-2 flex shrink-0 items-center justify-between gap-2">
+        <div className="flex items-center gap-1.5">
+          <Star className="h-3.5 w-3.5 text-accent" />
+          <h2 className="text-xs font-semibold text-foreground">自选</h2>
+          <span className="text-[10px] text-muted">{rows.length} 只{query.data?.as_of ? ` · ${query.data.as_of}` : ''}</span>
+        </div>
+        <Link to="/watchlist" title="进入自选管理" className="rounded p-1 text-muted hover:bg-accent/10 hover:text-accent">
+          <ArrowUpRight className="h-3.5 w-3.5" />
+        </Link>
+      </div>
+      {query.isError && <div role="alert" className="mb-2 text-xs text-danger">自选行情获取失败，请稍后重试。<button className="ml-2 underline" onClick={() => query.refetch()}>重试</button></div>}
+      <div className="min-h-0 flex-1 overflow-auto scrollbar-gutter-stable" tabIndex={0} role="region" aria-label="自选行情表，可左右滚动">
+        <table className="w-full min-w-[600px] table-fixed border-separate border-spacing-0 whitespace-nowrap text-xs">
+          <colgroup>
+            <col style={{ width: 172 }} />
+            <col style={{ width: 64 }} />
+            <col style={{ width: 72 }} />
+            <col style={{ width: 80 }} />
+            <col style={{ width: 100 }} />
+            <col style={{ width: 64 }} />
+            <col style={{ width: 48 }} />
+          </colgroup>
+          <thead>
+            <tr>
+              {['名称/代码', '现价', '涨跌幅', '成交额', '主力净流入', '换手率', '量比'].map((label, index) => (
+                <th key={label} scope="col" className={cn('sticky top-0 z-10 border-b border-border bg-elevated px-2 py-2 font-medium text-secondary', index === 0 ? 'text-left' : 'text-right')}>{label}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {query.isPending ? <tr><td colSpan={7} className="py-8 text-center text-muted">加载自选行情…</td></tr> : rows.length === 0 && !query.isError ? (
+              <tr><td colSpan={7} className="py-8 text-center text-muted">暂无自选股，<Link to="/watchlist" className="text-accent">前往添加</Link></td></tr>
+            ) : rows.map(row => (
+              <tr key={row.symbol} onClick={() => onStockClick(row.symbol, row.name ?? undefined, nav)}
+                className={cn('cursor-pointer hover:bg-elevated/70', row.symbol === activeSymbol && 'bg-accent/10')}>
+                <td className="border-b border-border/50 px-2 py-2.5">
+                  <button type="button" onClick={event => { event.stopPropagation(); onStockClick(row.symbol, row.name ?? undefined, nav) }} className="flex w-full min-w-0 items-center gap-1 text-left hover:text-accent">
+                    <span className="truncate text-foreground" title={row.name || row.symbol}>{row.name || '—'}</span><span className="shrink-0 font-mono text-secondary">{row.symbol}</span>
+                  </button>
+                </td>
+                <td className={`border-b border-border/50 px-2 py-2.5 text-right font-mono tabular-nums ${pctClass(row.change_pct)}`}>{fmtPrice(row.raw_close ?? row.close)}</td>
+                <td className={`border-b border-border/50 px-2 py-2.5 text-right font-mono tabular-nums ${pctClass(row.change_pct)}`}>{fmtStockPct(row.change_pct)}</td>
+                <td className="border-b border-border/50 px-2 py-2.5 text-right font-mono tabular-nums text-secondary">{fmtBigNum(row.amount)}</td>
+                <td className="border-b border-border/50 px-2 py-2.5 text-right text-muted" title="当前自选数据接口未提供主力净流入">—</td>
+                <td className="border-b border-border/50 px-2 py-2.5 text-right font-mono tabular-nums text-secondary">{row.turnover_rate == null ? '—' : `${fmtPrice(row.turnover_rate)}%`}</td>
+                <td className="border-b border-border/50 px-2 py-2.5 text-right font-mono tabular-nums text-secondary" title="沿用自选页的五日量比口径">{fmtPrice(row.vol_ratio_5d)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
   )
 }
