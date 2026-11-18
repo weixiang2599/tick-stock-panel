@@ -19,9 +19,9 @@ import { boardTag } from '@/components/stock-table/primitives'
 import { toNavItems, type NavItem } from '@/lib/listNav'
 import { fmtPrice, fmtIndexPct, fmtStockPct, pctClass, scoreColor as scoreColorValue, SectionTitle } from './shared'
 
-// 切股导航列表构建 (与列表展示行一致: StockList 只显示前 8)
-export function stockListNav(rows: MarketSnapshotRow[]): NavItem[] {
-  return toNavItems(rows.slice(0, 8))
+// 切股导航数量与榜单展示数量保持一致。
+export function stockListNav(rows: MarketSnapshotRow[], limit = 100): NavItem[] {
+  return toNavItems(rows.slice(0, limit))
 }
 export function rankNav(rank?: OverviewMarket['concept_rank']): NavItem[] {
   const leaders = [...(rank?.leading ?? []), ...(rank?.lagging ?? [])]
@@ -207,14 +207,15 @@ export function StockList({ title, rows, mode, onStockClick, activeSymbol }: {
   onStockClick?: (symbol: string, name?: string) => void;
   activeSymbol?: string;
 }) {
+  const limit = 100
   return (
-    <div className="rounded-card border border-border bg-surface/80 p-1.5 shadow-[0_1px_2px_hsl(var(--border)/0.4)] backdrop-blur-sm transition-shadow hover:shadow-[0_2px_8px_hsl(var(--border)/0.5)]">
+    <div className="flex h-full min-h-0 flex-col rounded-card border border-border bg-surface/80 p-1.5 shadow-[0_1px_2px_hsl(var(--border)/0.4)] backdrop-blur-sm transition-shadow hover:shadow-[0_2px_8px_hsl(var(--border)/0.5)]">
       <div className="mb-1 flex items-center justify-between">
         <h3 className="text-xs font-semibold text-foreground">{title}</h3>
-        <span className="text-[9px] text-muted">TOP {Math.min(rows.length, 8)}</span>
+        <span className="text-[9px] text-muted">TOP {Math.min(rows.length, limit)}</span>
       </div>
-      <div className="space-y-1">
-        {rows.slice(0, 8).map((r, idx) => (
+      <div className="min-h-0 flex-1 space-y-1 overflow-y-auto">
+        {rows.slice(0, limit).map((r, idx) => (
           <div
             key={`${r.symbol}-${idx}`}
             className={`grid grid-cols-[18px_1fr_auto] items-center gap-1.5 rounded-md px-1.5 py-1 cursor-pointer transition-colors border ${r.symbol === activeSymbol ? 'bg-accent/10 border-accent/30' : 'bg-elevated/40 border-transparent hover:bg-elevated hover:brightness-110 hover:border-border/60'}`}

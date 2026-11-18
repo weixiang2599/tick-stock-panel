@@ -343,7 +343,7 @@ def _dimension_rank(rows: list[dict], repo, kind: str, limit: int = 5, level: in
 # Top 行 / 涨跌幅分桶
 # ================================================================
 
-def _top_rows(rows: list[dict], key: str, descending: bool, limit: int = 8) -> list[dict]:
+def _top_rows(rows: list[dict], key: str, descending: bool, limit: int = 100) -> list[dict]:
     filtered = [r for r in rows if _finite(r.get(key)) is not None]
     filtered.sort(key=lambda r: _finite(r.get(key)) or 0, reverse=descending)
     return [
