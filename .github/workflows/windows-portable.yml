@@ -1,0 +1,114 @@
+name: Windows portable build
+
+on:
+  push:
+    branches: [windows-portable]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          architecture: x64
+      - name: Synchronize application version
+        run: python scripts/sync_versions.py
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.10.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - name: Build frontend
+        working-directory: frontend
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+      - uses: astral-sh/setup-uv@v5
+      - name: Install Windows desktop dependencies
+        working-directory: backend
+        run: |
+          uv sync --frozen --no-dev --extra desktop --extra legacy-cpu --python 3.12
+          uv pip install pyinstaller
+      - name: Freeze application
+        working-directory: backend
+        run: uv run --no-sync pyinstaller ../packaging/tsp.spec --noconfirm
+      - name: Prepare portable directory
+        shell: pwsh
+        run: |
+          Copy-Item packaging/TSP.exe.config backend/dist/TSP/TSP.exe.config
+          Copy-Item packaging/PORTABLE-WINDOWS.md backend/dist/TSP/README-WINDOWS.md
+          $required = @('TSP.exe', 'TSP.exe.config', '_internal/static/index.html', '_internal/_polars_runtime_32/_polars_runtime.pyd', '_internal/_polars_runtime_compat/_polars_runtime.pyd')
+          foreach ($file in $required) {
+            if (-not (Test-Path "backend/dist/TSP/$file")) { throw "Missing packaged file: $file" }
+          }
+          if (Test-Path backend/dist/TSP/data) { throw 'Build must not contain user data' }
+          @{commit=$env:GITHUB_SHA; version=(Get-Content frontend/package.json | ConvertFrom-Json).version; platform='windows-x64'} | ConvertTo-Json | Set-Content -Encoding utf8 backend/dist/TSP/build-info.json
+      - name: Generate upgrade manifest
+        shell: pwsh
+        run: |
+          $ver = (Get-Content frontend/package.json | ConvertFrom-Json).version
+          python scripts/generate_manifest.py --root backend/dist/TSP/_internal --output backend/dist/TSP/_internal/app/upgrade_manifest.json --version $ver
+      - name: Smoke test frozen Windows application
+        shell: pwsh
+        run: |
+          $env:DATA_DIR = Join-Path $env:RUNNER_TEMP 'tsp-smoke-data'
+          $exe = (Resolve-Path backend/dist/TSP/TSP.exe).Path
+          $proc = Start-Process -FilePath $exe -WorkingDirectory (Split-Path $exe) -PassThru
+          try {
+            $ready = $false
+            for ($i=0; $i -lt 90; $i++) {
+              $proc.Refresh()
+              if ($proc.HasExited) { throw "TSP exited early: $($proc.ExitCode)" }
+              try {
+                $health = Invoke-WebRequest http://127.0.0.1:3018/health -TimeoutSec 2
+                if ($health.StatusCode -eq 200) { $ready = $true; break }
+              } catch { }
+              Start-Sleep -Seconds 2
+            }
+            if (-not $ready) { throw 'Frozen application health check timed out' }
+            $page = Invoke-WebRequest http://127.0.0.1:3018/ -TimeoutSec 10
+            if ($page.Content -notmatch 'Tick Stock Panel') { throw 'Packaged frontend missing' }
+            Start-Sleep -Seconds 5
+            $proc.Refresh()
+            if ($proc.HasExited) { throw 'Desktop process exited after backend startup' }
+            Write-Host 'Frozen application backend and frontend smoke test passed'
+          } finally {
+            Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+            Remove-Item Env:DATA_DIR -ErrorAction SilentlyContinue
+          }
+      - name: Archive portable application
+        shell: pwsh
+        run: |
+          $ver = (Get-Content frontend/package.json | ConvertFrom-Json).version
+          $short = $env:GITHUB_SHA.Substring(0,8)
+          $zip = "TSP-Windows-Portable-x64-$ver-$short.zip"
+          Compress-Archive -Path backend/dist/TSP -DestinationPath $zip -CompressionLevel Optimal
+          (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower() + '  ' + $zip | Set-Content -Encoding ascii "$zip.sha256"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TSP-Windows-Portable-x64
+          path: |
+            TSP-Windows-Portable-x64-*.zip
+            TSP-Windows-Portable-x64-*.zip.sha256
+          compression-level: 0
+          retention-days: 30
+          if-no-files-found: error
+      - name: Upload smoke diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-build-diagnostics
+          path: |
+            ${{ runner.temp }}/tsp-smoke-data/logs/
+            backend/build/TSP/warn-TSP.txt
+          if-no-files-found: ignore

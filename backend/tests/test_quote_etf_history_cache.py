@@ -83,7 +83,7 @@ def test_warm_etf_output_matches_cold_recompute_after_changes(sample, monkeypatc
     cold.set_repo(repo)
     # Compare with the original uncached glob-read path, including all numeric
     # columns, nulls, adjusted prices and indicator warmup boundaries.
-    monkeypatch.setattr(cold, "_etf_live_history", lambda *args: None, raising=False)
+    monkeypatch.setattr(cold, "_asset_live_history", lambda *args: None, raising=False)
     cold._flush_live_enriched(today, asset_type="etf")
     assert len(output) == 3
     assert_frame_equal(output[-2], output[-1], check_exact=True)
@@ -119,4 +119,52 @@ def test_oversized_history_is_not_retained_and_repo_change_clears_cache(sample, 
     monkeypatch.setattr(pl.DataFrame, "estimated_size", lambda *args: 65 * 1024**2)
     service._flush_live_enriched(today, asset_type="etf")
     assert service._etf_history_cache is None
+    assert_frame_equal(output[-2], output[-1], check_exact=True)
+
+
+@pytest.fixture
+def index_sample(sample):
+    service, repo, today, output, days = sample
+    (repo.store.data_dir / "kline_etf_daily").rename(repo.store.data_dir / "kline_index_daily")
+    return service, repo, today, output, days
+
+
+def test_warm_index_updates_reuse_history(index_sample, monkeypatch):
+    service, _repo, today, output, _ = index_sample
+    original = quote_service.guarded_collect
+    scans = []
+
+    def collect(*args, **kwargs):
+        scans.append(1)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(quote_service, "guarded_collect", collect)
+    service._flush_live_enriched(today, asset_type="index")
+    service._flush_live_enriched(today, asset_type="index")
+    assert len(output) == 2
+    assert_frame_equal(output[0], output[1], check_exact=True)
+    assert len(scans) == 1
+
+
+@pytest.mark.parametrize("change", ["history", "delete", "rollover", "repo"])
+def test_index_history_invalidation_matches_cold(index_sample, monkeypatch, change):
+    service, repo, today, output, days = index_sample
+    service._flush_live_enriched(today, asset_type="index")
+    path = repo.store.data_dir / "kline_index_daily" / f"date={days[-1]}" / "part.parquet"
+    if change == "history":
+        pl.read_parquet(path).with_columns(pl.lit(15.0).alias("close")).write_parquet(path)
+    elif change == "delete":
+        path.unlink()
+    elif change == "repo":
+        service.set_repo(repo)
+    else:
+        monkeypatch.setattr(quote_service, "cn_today", lambda: TODAY + timedelta(days=1))
+        today = today.with_columns(pl.lit(TODAY + timedelta(days=1)).alias("date"))
+    today = today.with_columns((pl.col("close") + 0.5).alias("close"))
+    service._flush_live_enriched(today, asset_type="index")
+    cold = quote_service.QuoteService()
+    cold.set_repo(repo)
+    monkeypatch.setattr(cold, "_asset_live_history", lambda *args: None, raising=False)
+    cold._flush_live_enriched(today, asset_type="index")
+    assert len(output) == 3
     assert_frame_equal(output[-2], output[-1], check_exact=True)

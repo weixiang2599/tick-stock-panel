@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -351,6 +352,7 @@ class QuoteService:
         self._volume_delta: dict[str, tuple[float, float]] = {}
         self._volume_delta_span_s: float = 0.0
         self._etf_history_cache: tuple[tuple, pl.DataFrame] | None = None
+        self._index_history_cache: tuple[tuple, pl.DataFrame] | None = None
         from app.services.quote_demand import QuoteDemand
         self._quote_demand = QuoteDemand()
 
@@ -385,6 +387,7 @@ class QuoteService:
         if thread:
             thread.join(timeout=10)
         self._etf_history_cache = None
+        self._index_history_cache = None
         # 此处不持久化关闭: lifespan shutdown (容器停止/重启) 也调用 stop,
         # 持久化 False 会让每次重启后实时行情都变关闭、需手动再开。
         # 持久化语义归 disable() (用户主动关闭)。
@@ -478,6 +481,7 @@ class QuoteService:
         """注入 KlineRepository, 用于实时落盘。"""
         self._repo = repo
         self._etf_history_cache = None
+        self._index_history_cache = None
 
     def set_app_state(self, app_state) -> None:
         """注入 FastAPI app.state, 用于获取 strategy_monitor 等单例。"""
@@ -2071,28 +2075,41 @@ class QuoteService:
     # ================================================================
 
     @staticmethod
-    def _etf_history_files(root: Path, today: date) -> tuple:
+    def _asset_history_files(root: Path, today: date) -> tuple:
         # Daily storage uses date partitions. Probe only the existing 150-day
         # warmup horizon, so old years and today's repeated writes cost no scan.
         files = []
-        for offset in range(150, 0, -1):
-            folder = root / f"date={today - timedelta(days=offset)}"
-            for path in sorted(folder.glob("*.parquet")):
-                try:
-                    stat = path.stat()
-                except FileNotFoundError:
-                    continue
-                files.append((str(path), stat.st_mtime_ns, stat.st_ctime_ns, stat.st_size, stat.st_ino))
-        return tuple(files)
+        wanted = {f"date={today - timedelta(days=offset)}" for offset in range(1, 151)}
+        try:
+            with os.scandir(root) as partitions:
+                folders = sorted(entry.path for entry in partitions
+                                 if entry.name in wanted and entry.is_dir())
+        except FileNotFoundError:
+            return ()
+        for folder in folders:
+            try:
+                with os.scandir(folder) as entries:
+                    for entry in entries:
+                        if not entry.name.endswith(".parquet"):
+                            continue
+                        try:
+                            stat = entry.stat()
+                        except FileNotFoundError:
+                            continue
+                        files.append((entry.path, stat.st_mtime_ns, stat.st_ctime_ns, stat.st_size, stat.st_ino))
+            except FileNotFoundError:
+                continue
+        return tuple(sorted(files))
 
-    def _etf_live_history(self, today: date, columns: list[str]) -> pl.DataFrame | None:
-        root = self._repo.store.data_dir / "kline_etf_daily"
-        files = self._etf_history_files(root, today)
+    def _asset_live_history(self, today: date, columns: list[str], asset_type: str) -> pl.DataFrame | None:
+        root = self._repo.store.data_dir / f"kline_{asset_type}_daily"
+        cache_attr = f"_{asset_type}_history_cache"
+        files = self._asset_history_files(root, today)
         if not files:
-            self._etf_history_cache = None
+            setattr(self, cache_attr, None)
             return None  # Preserve the original empty-history fallback.
         key = (str(root), today, files)
-        cached = self._etf_history_cache
+        cached = getattr(self, cache_attr)
         if cached is not None and cached[0] == key:
             return cached[1]
         frame = guarded_collect(
@@ -2104,9 +2121,9 @@ class QuoteService:
         )
         # A bounded immutable input cache only: formulas, adjustment factors and
         # signals are still evaluated on each tick by the original pipeline.
-        self._etf_history_cache = None
-        if frame.estimated_size() <= 64 * 1024**2 and files == self._etf_history_files(root, today):
-            self._etf_history_cache = (key, frame)
+        setattr(self, cache_attr, None)
+        if frame.estimated_size() <= 64 * 1024**2 and files == self._asset_history_files(root, today):
+            setattr(self, cache_attr, (key, frame))
         return frame
 
     def _flush_live_enriched(self, daily_df: pl.DataFrame, quote_extra: pl.DataFrame = None, asset_type: str = "stock", merge: bool = False) -> None:
@@ -2175,7 +2192,7 @@ class QuoteService:
                 table = {"etf": "kline_etf_daily", "index": "kline_index_daily"}.get(asset_type, "kline_daily")
                 daily_glob = str(self._repo.store.data_dir / table / "**" / "*.parquet")
                 ohlcv_cols = ["symbol", "date", "open", "high", "low", "close", "volume", "amount", "quote_ts"]
-                hist_df = self._etf_live_history(today, ohlcv_cols) if asset_type == "etf" else None
+                hist_df = self._asset_live_history(today, ohlcv_cols, asset_type) if asset_type in {"etf", "index"} else None
                 if hist_df is None:
                     hist_df = guarded_collect(
                         scan_daily_parquet(daily_glob)

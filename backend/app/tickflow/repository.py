@@ -1798,6 +1798,17 @@ class KlineRepository:
         p = f"{base}/date={trade_date.isoformat()}/part.parquet"
         return p if Path(p).exists() else None
 
+    def _minute_sources(self, asset_type: str, trade_date: date | None = None) -> list[str]:
+        # Empty stores are normal when the provider has no minute capability.
+        # Resolve files before invoking Polars, without caching absence: a newly
+        # downloaded partition must become visible on the very next read.
+        if trade_date is not None:
+            part = self._minute_partition_path(asset_type, trade_date)
+            if part is not None:
+                return [part]
+        root = Path(self._minute_glob_for(asset_type).rsplit("/", 2)[0])
+        return sorted(str(path) for path in root.rglob("*.parquet"))
+
     def get_minute(
         self,
         symbol: str,
@@ -1810,8 +1821,9 @@ class KlineRepository:
         本地分钟历史线性增长; 单日数据按约定完整落在 date= 分区内, 谓词不变。
         """
         try:
-            part = self._minute_partition_path(asset_type, trade_date)
-            source = part if part is not None else self._minute_glob_for(asset_type)
+            source = self._minute_sources(asset_type, trade_date)
+            if not source:
+                return pl.DataFrame()
             df = guarded_collect(
                 pl.scan_parquet(source).filter(
                     (pl.col("symbol") == symbol)
@@ -1837,8 +1849,9 @@ class KlineRepository:
         if not symbols:
             return pl.DataFrame()
         try:
-            part = self._minute_partition_path(asset_type, trade_date)
-            source = part if part is not None else self._minute_glob_for(asset_type)
+            source = self._minute_sources(asset_type, trade_date)
+            if not source:
+                return pl.DataFrame()
             df = guarded_collect(
                 pl.scan_parquet(source).filter(
                     pl.col("symbol").is_in(symbols)
@@ -1865,7 +1878,10 @@ class KlineRepository:
         if not symbols:
             return pl.DataFrame()
         try:
-            lf = pl.scan_parquet(self._minute_glob_for(asset_type))
+            source = self._minute_sources(asset_type)
+            if not source:
+                return pl.DataFrame()
+            lf = pl.scan_parquet(source)
             available = set(lf.collect_schema().names())
             select_cols = [c for c in ["symbol", "datetime", "open", "high", "low", "close", "volume", "amount"] if c in available]
             df = guarded_collect(

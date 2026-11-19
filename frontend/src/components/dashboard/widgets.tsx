@@ -542,26 +542,25 @@ export function WatchlistWidget({ activeSymbol, onStockClick }: {
       </div>
       {query.isError && <div role="alert" className="mb-2 text-xs text-danger">自选行情获取失败，请稍后重试。<button className="ml-2 underline" onClick={() => query.refetch()}>重试</button></div>}
       <div className="min-h-0 flex-1 overflow-auto scrollbar-gutter-stable" tabIndex={0} role="region" aria-label="自选行情表，可左右滚动">
-        <table className="w-full min-w-[600px] table-fixed border-separate border-spacing-0 whitespace-nowrap text-xs">
+        <table className="w-full min-w-[500px] table-fixed border-separate border-spacing-0 whitespace-nowrap text-xs">
           <colgroup>
             <col style={{ width: 172 }} />
             <col style={{ width: 64 }} />
             <col style={{ width: 72 }} />
             <col style={{ width: 80 }} />
-            <col style={{ width: 100 }} />
             <col style={{ width: 64 }} />
             <col style={{ width: 48 }} />
           </colgroup>
           <thead>
             <tr>
-              {['名称/代码', '现价', '涨跌幅', '成交额', '主力净流入', '换手率', '量比'].map((label, index) => (
+              {['名称/代码', '现价', '涨跌幅', '成交额', '换手率', '量比'].map((label, index) => (
                 <th key={label} scope="col" className={cn('sticky top-0 z-10 border-b border-border bg-elevated px-2 py-2 font-medium text-secondary', index === 0 ? 'text-left' : 'text-right')}>{label}</th>
               ))}
             </tr>
           </thead>
           <tbody>
-            {query.isPending ? <tr><td colSpan={7} className="py-8 text-center text-muted">加载自选行情…</td></tr> : rows.length === 0 && !query.isError ? (
-              <tr><td colSpan={7} className="py-8 text-center text-muted">暂无自选股，<Link to="/watchlist" className="text-accent">前往添加</Link></td></tr>
+            {query.isPending ? <tr><td colSpan={6} className="py-8 text-center text-muted">加载自选行情…</td></tr> : rows.length === 0 && !query.isError ? (
+              <tr><td colSpan={6} className="py-8 text-center text-muted">暂无自选股，<Link to="/watchlist" className="text-accent">前往添加</Link></td></tr>
             ) : rows.map(row => (
               <tr key={row.symbol} onClick={() => onStockClick(row.symbol, row.name ?? undefined, nav)}
                 className={cn('cursor-pointer hover:bg-elevated/70', row.symbol === activeSymbol && 'bg-accent/10')}>
@@ -573,7 +572,6 @@ export function WatchlistWidget({ activeSymbol, onStockClick }: {
                 <td className={`border-b border-border/50 px-2 py-2.5 text-right font-mono tabular-nums ${pctClass(row.change_pct)}`}>{fmtPrice(row.raw_close ?? row.close)}</td>
                 <td className={`border-b border-border/50 px-2 py-2.5 text-right font-mono tabular-nums ${pctClass(row.change_pct)}`}>{fmtStockPct(row.change_pct)}</td>
                 <td className="border-b border-border/50 px-2 py-2.5 text-right font-mono tabular-nums text-secondary">{fmtBigNum(row.amount)}</td>
-                <td className="border-b border-border/50 px-2 py-2.5 text-right text-muted" title="当前自选数据接口未提供主力净流入">—</td>
                 <td className="border-b border-border/50 px-2 py-2.5 text-right font-mono tabular-nums text-secondary">{row.turnover_rate == null ? '—' : `${fmtPrice(row.turnover_rate)}%`}</td>
                 <td className="border-b border-border/50 px-2 py-2.5 text-right font-mono tabular-nums text-secondary" title="沿用自选页的五日量比口径">{fmtPrice(row.vol_ratio_5d)}</td>
               </tr>
